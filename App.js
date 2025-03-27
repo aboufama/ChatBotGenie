@@ -20,6 +20,10 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { Provider as PaperProvider, DefaultTheme } from 'react-native-paper';
 
+// Import our Auth Provider
+import { AuthProvider, useAuth } from './services/AuthContext';
+import LoginScreen from './components/LoginScreen';
+
 // Custom theme for React Native Paper
 const theme = {
   ...DefaultTheme,
@@ -105,15 +109,22 @@ try {
 }
 
 function AppContent() {
+  const { apiKey, isAuthenticated, login, logout, loading: authLoading } = useAuth();
   const [initializing, setInitializing] = useState(true);
   const [initError, setInitError] = useState(null);
   const [networkAvailable, setNetworkAvailable] = useState(true);
   const [lastUserMessage, setLastUserMessage] = useState('');
   
+  // Handle login success
+  const handleLoginSuccess = (newApiKey) => {
+    login(newApiKey);
+  };
+  
   // Safe initialization of chat service
   let chatServiceResult = { messages: [], loading: false, error: null, sendMessage: () => {}, clearChat: () => {} };
   try {
-    chatServiceResult = useChatService();
+    // Pass the API key to the chat service
+    chatServiceResult = useChatService({ apiKey });
   } catch (err) {
     console.error('Error initializing chat service:', err);
     setInitError(`Failed to initialize chat service: ${err.message || 'Unknown error'}`);
@@ -141,6 +152,26 @@ function AppContent() {
       // finding and replacing the last bot message
       sendMessage(lastUserMessage, true);
     }
+  };
+
+  // Handle logout
+  const handleLogout = async () => {
+    Alert.alert(
+      'Logout',
+      'Are you sure you want to logout? Your API key will be removed.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { 
+          text: 'Logout', 
+          style: 'destructive',
+          onPress: async () => {
+            await logout();
+            // Clear chat when logging out
+            clearChat();
+          }
+        }
+      ]
+    );
   };
 
   // Check network connectivity
@@ -204,8 +235,8 @@ function AppContent() {
     return true;
   };
 
-  // If still initializing, show loading screen
-  if (initializing) {
+  // If still initializing or auth is loading, show loading screen
+  if (initializing || authLoading) {
     return (
       <SafeAreaProvider>
         <GestureHandlerRootView style={{ flex: 1 }}>
@@ -216,6 +247,11 @@ function AppContent() {
         </GestureHandlerRootView>
       </SafeAreaProvider>
     );
+  }
+
+  // If not authenticated, show login screen
+  if (!isAuthenticated) {
+    return <LoginScreen onLoginSuccess={handleLoginSuccess} />;
   }
 
   // If there was an initialization error
@@ -246,9 +282,14 @@ function AppContent() {
           
           <View style={styles.header}>
             <Text style={styles.headerTitle}>Genie Chat</Text>
-            <TouchableOpacity style={styles.clearButton} onPress={clearChat}>
-              <Text style={styles.clearButtonText}>Clear Chat</Text>
-            </TouchableOpacity>
+            <View style={styles.headerButtons}>
+              <TouchableOpacity style={styles.clearButton} onPress={clearChat}>
+                <Text style={styles.clearButtonText}>Clear Chat</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
+                <Text style={styles.clearButtonText}>Logout</Text>
+              </TouchableOpacity>
+            </View>
           </View>
           
           {!networkAvailable && (
@@ -295,7 +336,9 @@ export default function App() {
   return (
     <ErrorBoundary>
       <PaperProvider theme={theme}>
-        <AppContent />
+        <AuthProvider>
+          <AppContent />
+        </AuthProvider>
       </PaperProvider>
     </ErrorBoundary>
   );
@@ -304,30 +347,41 @@ export default function App() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: '#ffffff',
   },
   header: {
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'space-between',
-    padding: 16,
-    backgroundColor: '#4ae383',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#ddd',
+    borderBottomColor: '#f0f0f0',
   },
   headerTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: 'white',
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#4ae383',
+  },
+  headerButtons: {
+    flexDirection: 'row',
   },
   clearButton: {
-    padding: 8,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+    backgroundColor: '#f0f0f0',
+    marginRight: 8,
+  },
+  logoutButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+    backgroundColor: '#f0f0f0',
   },
   clearButtonText: {
-    color: 'white',
-    fontWeight: '600',
+    color: '#666',
+    fontWeight: '500',
   },
   chatContainer: {
     flex: 1,

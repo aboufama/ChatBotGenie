@@ -5,7 +5,8 @@ import {
   createMessage, 
   getSQLQueryResult,
   executeSQLQuery,
-  transformDatabricksResultToChartData
+  transformDatabricksResultToChartData,
+  getAttachmentQueryResult
 } from './genieApi';
 
 // Simple type for messages
@@ -24,8 +25,14 @@ export interface ChatMessage {
   sqlError?: string;
 }
 
+// Define hook parameters
+export interface UseChatServiceParams {
+  apiKey?: string;
+}
+
 // Custom hook for chat service
-export const useChatService = () => {
+export const useChatService = (params?: UseChatServiceParams) => {
+  const { apiKey } = params || {};
   const [messages, setMessages] = useState<ChatMessage[]>([
     { 
       id: '1', 
@@ -140,13 +147,13 @@ export const useChatService = () => {
       // Start a new conversation or continue existing one
       if (!currentConversationId) {
         // Start a new conversation
-        responseData = await startConversation(text);
+        responseData = await startConversation(text, apiKey);
         currentConversationId = responseData.conversation_id;
         messageId = responseData.message_id;
         setConversationId(currentConversationId);
       } else {
         // Create a new message in the existing conversation
-        responseData = await createMessage(currentConversationId, text);
+        responseData = await createMessage(currentConversationId, text, apiKey);
         messageId = responseData.id;
       }
       
@@ -156,7 +163,7 @@ export const useChatService = () => {
       }
       
       // Poll for response
-      const pollResult = await pollForResponse(currentConversationId, messageId);
+      const pollResult = await pollForResponse(currentConversationId, messageId, apiKey);
       
       // Extract content based on response type
       const { content, isQueryResponse } = extractContent(pollResult);
@@ -172,7 +179,7 @@ export const useChatService = () => {
           const sqlQuery = pollResult.attachments[0].query.query;
           
           // Execute SQL query directly with Databricks API
-          sqlExecutionResult = await executeSQLQuery(sqlQuery);
+          sqlExecutionResult = await executeSQLQuery(sqlQuery, apiKey);
           
           // Transform result to chart-friendly format
           sqlChartData = transformDatabricksResultToChartData(sqlExecutionResult);
@@ -186,9 +193,21 @@ export const useChatService = () => {
       let sqlResult = null;
       if (hasSQLQuery(pollResult) && currentConversationId && messageId) {
         try {
-          sqlResult = await getSQLQueryResult(currentConversationId, messageId);
-        } catch (sqlErr) {
-          console.error('Error getting SQL results from Genie:', sqlErr);
+          // Check if we have an attachment ID
+          if (pollResult?.attachments?.[0]?.attachment_id) {
+            // Use the new attachment-specific endpoint
+            sqlResult = await getAttachmentQueryResult(
+              currentConversationId, 
+              messageId, 
+              pollResult.attachments[0].attachment_id,
+              apiKey
+            );
+          } else {
+            // Fallback to the old endpoint
+            sqlResult = await getSQLQueryResult(currentConversationId, messageId, apiKey);
+          }
+        } catch (err) {
+          console.error('Error getting SQL result:', err);
         }
       }
       
@@ -248,7 +267,7 @@ export const useChatService = () => {
     } finally {
       setLoading(false);
     }
-  }, [conversationId, messages]);
+  }, [messages, conversationId, apiKey]);
 
   // Clear all messages and reset conversation
   const clearChat = useCallback(() => {

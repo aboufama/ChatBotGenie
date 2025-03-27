@@ -7,7 +7,16 @@ module.exports = function(api) {
         moduleName: '@env',
         path: '.env',
         blacklist: null,
-        whitelist: null,
+        whitelist: [
+          'API_TOKEN',
+          'SPACE_ID',
+          'INSTANCE_URL',
+          'WAREHOUSE_ID',
+          'AZURE_CLIENT_ID',
+          'AZURE_TENANT_ID',
+          'REDIRECT_URI',
+          'AZURE_SCOPES'
+        ],
         safe: true,
         allowUndefined: false
       }],

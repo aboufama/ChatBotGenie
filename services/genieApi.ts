@@ -13,21 +13,31 @@
 
 // services/genieApi.ts - Simple API client that returns raw JSON
 import {
-  API_TOKEN,
   SPACE_ID,
   INSTANCE_URL,
   WAREHOUSE_ID
 } from '@env';
 
+// API_TOKEN is now passed as a parameter or read from .env as fallback
+import { API_TOKEN as DEFAULT_API_TOKEN } from '@env';
+
+// Helper to get API token - only use the provided API token
+const getApiToken = (apiToken?: string): string => {
+  if (!apiToken) {
+    throw new Error('API token is required but was not provided');
+  }
+  return apiToken;
+};
+
 // Start a new conversation with Genie - returns raw API response
-export const startConversation = async (question: string): Promise<any> => {
+export const startConversation = async (question: string, apiToken?: string): Promise<any> => {
   try {
     console.log(`Starting conversation with message: "${question}"`);
     
     const response = await fetch(`https://${INSTANCE_URL}/api/2.0/genie/spaces/${SPACE_ID}/start-conversation`, {
       method: "POST",
       headers: {
-        "Authorization": `Bearer ${API_TOKEN}`,
+        "Authorization": `Bearer ${getApiToken(apiToken)}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ content: question }),
@@ -46,14 +56,14 @@ export const startConversation = async (question: string): Promise<any> => {
 };
 
 // Create a new message in an existing conversation - returns raw API response
-export const createMessage = async (conversationId: string, question: string): Promise<any> => {
+export const createMessage = async (conversationId: string, question: string, apiToken?: string): Promise<any> => {
   try {
     console.log(`Creating message in conversation ${conversationId}: "${question}"`);
     
     const response = await fetch(`https://${INSTANCE_URL}/api/2.0/genie/spaces/${SPACE_ID}/conversations/${conversationId}/messages`, {
       method: "POST",
       headers: {
-        "Authorization": `Bearer ${API_TOKEN}`,
+        "Authorization": `Bearer ${getApiToken(apiToken)}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ content: question }),
@@ -75,6 +85,7 @@ export const createMessage = async (conversationId: string, question: string): P
 export const pollForResponse = async (
   conversationId: string,
   messageId: string,
+  apiToken?: string,
   attempts: number = 0
 ): Promise<any> => {
   try {
@@ -86,12 +97,12 @@ export const pollForResponse = async (
     
     const response = await fetch(`https://${INSTANCE_URL}/api/2.0/genie/spaces/${SPACE_ID}/conversations/${conversationId}/messages/${messageId}`, {
       method: "GET",
-      headers: { "Authorization": `Bearer ${API_TOKEN}` },
+      headers: { "Authorization": `Bearer ${getApiToken(apiToken)}` },
     });
     
     if (response.status === 409 && attempts < 15) {
       console.log(`Received 409 conflict, retrying... (attempt ${attempts + 1})`);
-      return await pollForResponse(conversationId, messageId, attempts + 1);
+      return await pollForResponse(conversationId, messageId, apiToken, attempts + 1);
     }
     
     if (!response.ok) {
@@ -102,7 +113,7 @@ export const pollForResponse = async (
     
     // Continue polling if not complete
     if ((data.status !== "COMPLETED" && data.status !== "FAILED") && attempts < 20) {
-      return await pollForResponse(conversationId, messageId, attempts + 1);
+      return await pollForResponse(conversationId, messageId, apiToken, attempts + 1);
     }
     
     return data;
@@ -116,6 +127,7 @@ export const pollForResponse = async (
 export const getSQLQueryResult = async (
   conversationId: string,
   messageId: string,
+  apiToken?: string,
   attempts: number = 0
 ): Promise<any> => {
   try {
@@ -127,7 +139,7 @@ export const getSQLQueryResult = async (
     
     const response = await fetch(`https://${INSTANCE_URL}/api/2.0/genie/spaces/${SPACE_ID}/conversations/${conversationId}/messages/${messageId}/query-result`, {
       method: "GET",
-      headers: { "Authorization": `Bearer ${API_TOKEN}` },
+      headers: { "Authorization": `Bearer ${getApiToken(apiToken)}` },
     });
     
     if (!response.ok) {
@@ -141,12 +153,50 @@ export const getSQLQueryResult = async (
     
     // Continue polling if query is still running
     if ((state === "RUNNING" || state === "PENDING") && attempts < 15) {
-      return await getSQLQueryResult(conversationId, messageId, attempts + 1);
+      return await getSQLQueryResult(conversationId, messageId, apiToken, attempts + 1);
     }
     
     return data;
   } catch (error) {
     console.error("Error getting SQL query result:", error);
+    throw error;
+  }
+};
+
+// Get query results for a specific attachment - matches updated API
+export const getAttachmentQueryResult = async (
+  conversationId: string,
+  messageId: string,
+  attachmentId: string,
+  apiToken?: string,
+  attempts: number = 0
+): Promise<any> => {
+  try {
+    // Add delay for retries
+    if (attempts > 0) {
+      const delay = Math.min(1000 * Math.pow(1.5, attempts), 10000);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+    
+    const response = await fetch(`https://${INSTANCE_URL}/api/2.0/genie/spaces/${SPACE_ID}/conversations/${conversationId}/messages/${messageId}/attachments/${attachmentId}/query-result`, {
+      method: "GET",
+      headers: { "Authorization": `Bearer ${getApiToken(apiToken)}` },
+    });
+    
+    if (!response.ok) {
+      throw new Error(`API error ${response.status}`);
+    }
+    
+    const data = await response.json();
+    
+    // Continue polling if query is still running (based on status if available)
+    if (data.statement_response?.status?.state === "RUNNING" && attempts < 15) {
+      return await getAttachmentQueryResult(conversationId, messageId, attachmentId, apiToken, attempts + 1);
+    }
+    
+    return data;
+  } catch (error) {
+    console.error("Error getting attachment query result:", error);
     throw error;
   }
 };
@@ -158,14 +208,14 @@ export const transformQueryResultToChartData = (queryResult: any): any => {
 };
 
 // Execute SQL query directly using Databricks SQL API
-export const executeSQLQuery = async (sqlQuery: string): Promise<any> => {
+export const executeSQLQuery = async (sqlQuery: string, apiToken?: string): Promise<any> => {
   try {
     console.log(`Executing SQL query with Databricks API: "${sqlQuery}"`);
     
     const response = await fetch(`https://${INSTANCE_URL}/api/2.0/sql/statements/`, {
       method: "POST",
       headers: {
-        "Authorization": `Bearer ${API_TOKEN}`,
+        "Authorization": `Bearer ${getApiToken(apiToken)}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
